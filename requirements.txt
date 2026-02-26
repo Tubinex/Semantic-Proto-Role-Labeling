@@ -1,0 +1,9 @@
+torch>=2.0
+transformers>=4.36
+tqdm>=4.65
+matplotlib
+ipywidgets
+pandas
+
+pytest>=7.4
+pytest-cov
