@@ -57,7 +57,7 @@ class Prober:
         self.model.to(self.device)
         self.model.eval()
 
-        id2label: Dict[int, str] = self.model.config.id2label 
+        id2label: Dict[int, str] = self.model.config.id2label
         self.label_mapper = LabelMapper.from_user_label_map_arg(
             id2label,
             label_map_arg=label_map_arg,
@@ -115,7 +115,7 @@ class Prober:
 
         all_probs: List[torch.Tensor] = []
         for batch_start in range(0, len(normalized), self.batch_size):
-            batch = normalized[batch_start : batch_start + self.batch_size]
+            batch = normalized[batch_start: batch_start + self.batch_size]
             probs = self._run_batch(batch)
             all_probs.append(probs)
 
@@ -148,7 +148,7 @@ class Prober:
         encoding = {k: v.to(self.device) for k, v in encoding.items()}
 
         with torch.no_grad():
-            logits = self.model(**encoding).logits 
+            logits = self.model(**encoding).logits
 
         return F.softmax(logits, dim=-1).cpu()
 
@@ -162,11 +162,14 @@ class Prober:
         probs_list = probs.tolist()
 
         if lm.n_classes == 3:
+            p_contradiction = probs_list[lm.idx_contradiction]
             p_entailment = probs_list[lm.idx_entailment]
-            p_neutral = probs_list[lm.idx_neutral] 
-            p_contradiction = probs_list[lm.idx_contradiction] 
-            p_entail = p_entailment
-            p_not_entail = p_neutral + p_contradiction
+            p_neutral = probs_list[lm.idx_neutral]
+
+            p_entail = p_entailment + (p_neutral / 2)
+            #p_not_entail = p_neutral + p_contradiction
+            p_not_entail = p_contradiction + (p_neutral / 2)
+
             raw = {
                 "p_entailment": p_entailment,
                 "p_neutral": p_neutral,
@@ -174,7 +177,7 @@ class Prober:
             }
         else:
             p_entailment = probs_list[lm.idx_entailment]
-            p_not_entailment = probs_list[lm.idx_not_entailment] 
+            p_not_entailment = probs_list[lm.idx_not_entailment]
             p_entail = p_entailment
             p_not_entail = p_not_entailment
             raw = {

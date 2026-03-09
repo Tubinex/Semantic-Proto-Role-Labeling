@@ -6,26 +6,18 @@ import sys
 from pathlib import Path
 from typing import Iterator, Optional
 
-HYPOTHESIS_TEMPLATES: dict[str, str] = {
-    "awareness":                  "{arg} was aware of what was happening.",
-    "change_of_location":         "{arg} changed location as a result of the event.",
-    "change_of_state":            "{arg} underwent a change of state.",
-    "changes_possession":         "{arg} changed hands.",
-    "existed_after":              "{arg} existed after the event.",
-    "existed_before":             "{arg} existed before the event.",
-    "existed_during":             "{arg} existed during the event.",
-    "exists_as_physical":         "{arg} is a physical entity.",
-    "instigation":                "{arg} instigated the event.",
-    "location_of_event":          "The event took place where {arg} was.",
-    "makes_physical_contact":     "{arg} made physical contact with something during the event.",
-    "manipulated_by_another":     "{arg} was manipulated by another participant.",
-    "predicate_changed_argument": "{arg} underwent a change as a result of the event.",
-    "sentient":                   "{arg} is sentient.",
-    "stationary":                 "{arg} remained stationary during the event.",
-    "volition":                   "{arg} did this volitionally.",
-    "created":                    "{arg} came into existence as a result of the event.",
-    "destroyed":                  "{arg} ceased to exist as a result of the event.",
-}
+from tqdm import tqdm
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from hypothesis import (
+    HypothesisGenerator,
+    MultiTemplateGenerator,
+    OpenAIGenerator,
+    TemplateGenerator,
+    TypeAwareTemplateGenerator,
+    batch_classify,
+)
 
 
 def parse_vp(vp: str) -> tuple[str, str]:
@@ -91,13 +83,19 @@ def markup_sentence(sentence: str, verb: str, arg: str) -> tuple[str, bool]:
 def iter_pairs(
     data: dict,
     *,
+    generator: HypothesisGenerator,
     split_filter: Optional[str],
     skip_inapplicable: bool,
+    max_entries: Optional[int] = None,
 ) -> Iterator[dict]:
     markup_failures = 0
     total = 0
+    entries_seen = 0
 
-    for spr_id, entries in data.items():
+    total_entries = min(len(data), max_entries) if max_entries is not None else len(data)
+    for spr_id, entries in tqdm(data.items(), total=total_entries, desc="Generating pairs", unit="entry"):
+        if max_entries is not None and entries_seen >= max_entries:
+            break
         entry = entries[0]
 
         split = entry.get("split", "")
@@ -120,21 +118,24 @@ def iter_pairs(
         if not ok:
             markup_failures += 1
 
+        entries_seen += 1
+
+        hypotheses = generator.generate_all(
+            arg=arg, verb=verb, sentence=target_text, props=cats
+        )
+
         for prop, label, applicable_str in zip(cats, labels, applicables):
             applicable = applicable_str.strip().lower() == "true"
 
             if skip_inapplicable and not applicable:
                 continue
 
-            hyp_template = HYPOTHESIS_TEMPLATES.get(prop)
-            if hyp_template is None:
+            hypothesis = hypotheses.get(prop, "")
+            if not hypothesis:
                 print(
-                    f"WARNING: no hypothesis template for property {prop!r}",
+                    f"WARNING: empty hypothesis for property {prop!r} in {spr_id}",
                     file=sys.stderr,
                 )
-                hypothesis = ""
-            else:
-                hypothesis = hyp_template.format(arg=arg)
 
             row_id = f"{spr_id}_{prop}"
 
@@ -160,6 +161,18 @@ def iter_pairs(
             f"({pct:.1f}%); those rows use the plain sentence.",
             file=sys.stderr,
         )
+
+
+def _build_generator(args: argparse.Namespace) -> HypothesisGenerator:
+    if args.generator == "template":
+        return TemplateGenerator()
+    if args.generator == "multi-template":
+        return MultiTemplateGenerator(seed=args.seed)
+    if args.generator == "llm-openai":
+        return OpenAIGenerator(model=args.llm_model, temperature=args.llm_temperature)
+    if args.generator == "type-aware-templates":
+        return TypeAwareTemplateGenerator(model=args.type_aware_model)
+    raise ValueError(f"Unknown generator: {args.generator!r}")
 
 
 def main() -> int:
@@ -191,18 +204,93 @@ def main() -> int:
         default=False,
         help="Omit rows where applicable=False.",
     )
+
+    p.add_argument(
+        "--generator",
+        default="template",
+        choices=["template", "multi-template", "llm-openai", "type-aware-templates"],
+        help=(
+            "How to generate hypotheses.  "
+            "'template' uses the original fixed templates; "
+            "'multi-template' randomly samples from several templates per property; "
+            "'llm-openai' calls the OpenAI API to write context-aware hypotheses; "
+            "'type-aware-templates' classifies the argument's semantic type and selects "
+            "type-specific controlled templates (requires transformers)."
+        ),
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        metavar="INT",
+        help="Random seed for multi-template sampling (omit for non-deterministic).",
+    )
+    p.add_argument(
+        "--llm-model",
+        default="gpt-4o-mini",
+        metavar="MODEL",
+        help="OpenAI model name (only used with --generator llm-openai).",
+    )
+    p.add_argument(
+        "--llm-temperature",
+        type=float,
+        default=0.3,
+        metavar="FLOAT",
+        help="Sampling temperature for the LLM (only used with --generator llm-openai).",
+    )
+    p.add_argument(
+        "--type-aware-model",
+        default="roberta-large-mnli",
+        metavar="MODEL",
+        help=(
+            "HuggingFace model ID for zero-shot classification "
+            "(only used with --generator type-aware-templates)."
+        ),
+    )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Stop after processing N dataset entries (useful for quick tests).",
+    )
+
     args = p.parse_args()
+
+    generator = _build_generator(args)
 
     print(f"Loading {args.input} …", file=sys.stderr)
     with open(args.input, encoding="utf-8") as f:
         data = json.load(f)
     print(f"  {len(data)} entries loaded.", file=sys.stderr)
 
+    if isinstance(generator, TypeAwareTemplateGenerator):
+        entries_iter = list(data.values())
+        if args.limit is not None:
+            entries_iter = entries_iter[: args.limit]
+        all_args: list[str] = []
+        for entries in entries_iter:
+            entry = entries[0]
+            if args.split is not None and entry.get("split", "") != args.split:
+                continue
+            try:
+                _, arg = parse_vp(entry["vp"])
+                all_args.append(arg)
+            except ValueError:
+                pass
+        print(
+            f"  Pre-classifying {len(set(all_args))} unique arguments in batch …",
+            file=sys.stderr,
+        )
+        batch_classify(all_args, generator._model)
+
     rows = list(
         iter_pairs(
             data,
+            generator=generator,
             split_filter=args.split,
             skip_inapplicable=args.skip_inapplicable,
+            max_entries=args.limit,
         )
     )
     print(f"  {len(rows)} pairs generated.", file=sys.stderr)
