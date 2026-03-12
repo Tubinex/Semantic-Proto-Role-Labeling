@@ -1,167 +1,174 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple, Union
+
 import numpy as np
-import shap
-from shap.maskers import Text
-from typing import Tuple, List
 
-from transformers import AutoTokenizer
+try:
+    import shap
+except ModuleNotFoundError:
+    shap = None
 
-from probing.prober import Prober
-
-# TODO sehr vieles ist überflüssig (oder nicht wer weiß)
-# TODO die explain methoden sind variationen desselben
+if TYPE_CHECKING:
+    from probing.prober import Prober
 
 
-class OhneMasker:                                       # war ein test weil der masker einfach alle tokens maskiert hat
-    def __call__(self, x, *args, **kwargs): # nuh uh
-        return x
+Pair = Union[Sequence[str], Tuple[str, str]]
 
-class CustomMasker:                                     # same here
-    def __init__(self, tokenizer):
-        self.tokenizer = tokenizer
 
-    def __call__(self, pair_string: str, *args, **kwargs):
-        premise, hypothesis = pair_string.split(". ", 1)
-
-        premise_tokens = self.tokenizer.tokenize(premise)
-        hypothesis_tokens = self.tokenizer.tokenize(hypothesis[:-1])
-
-        combined_tokens = premise_tokens + ". " + hypothesis_tokens + "."
-        return combined_tokens
-
-class ShapleyProber:                                         # hauptding
-    def __init__(self, prober: Prober):
+class ShapleyProber:
+    def __init__(self, prober: "Prober", *, output_key: str = "p_entail"):
         self.prober = prober
+        self.output_key = output_key
 
-    def entailment_scalar(self, text:str) -> float:                     # returnt nur wahrscheinlichkeit für entailment
+    @staticmethod
+    def _normalize_pair(pair: Pair) -> Tuple[str, str]:
+        if len(pair) != 2:
+            raise ValueError(f"Pair must contain exactly 2 strings, got {len(pair)}")
+        return str(pair[0]), str(pair[1])
 
-        premise, hypothesis = text.split(" [SEP] ", 1)
-        #premise, hypothesis = pair
-        return self.prober.predict_one(premise, hypothesis)["p_entail"]
+    @staticmethod
+    def _to_list(values: Union[np.ndarray, Sequence[str], str]) -> List[str]:
+        if isinstance(values, np.ndarray):
+            values = values.tolist()
+        if isinstance(values, str):
+            return [values]
+        return [str(v) for v in values]
 
-    def shapley_predict(self, pairs: np.ndarray) -> np.ndarray:             # dem shapley explainer muss entweder das model oder so eine funktion übergeben werden
-        pairs = pairs.tolist()
-        probabilities = []
-        for entries in pairs:
-            print("pairs: ", pairs)
-            print("entries: ", entries)
-            parts = entries.split(". ", 1)
-            t, h = parts
-            t = t + "."
-            print(t)
-            result = self.prober.predict_one(t, h)["p_entail"]
-            probabilities.append(result)
-        return np.array(probabilities)
+    def _predict_with_fixed_premise(
+        self,
+        premise: str,
+        hypotheses: Union[np.ndarray, Sequence[str], str],
+    ) -> np.ndarray:
+        hyps = self._to_list(hypotheses)
+        pairs = [{"target_text": premise, "hypothesis": h} for h in hyps]
+        results = self.prober.predict_batch(pairs)
+        return np.array([float(r[self.output_key]) for r in results], dtype=np.float64)
 
-    def _single_string(self, pair: List[str]) -> str:                         #   shapley wollte manchmal einfach nur einen string als input
-        premise, hypothesis = pair
-        #return f"{premise} [SEP] {hypothesis}"
-        return premise + " " + hypothesis
+    def _predict_with_fixed_hypothesis(
+        self,
+        target_texts: Union[np.ndarray, Sequence[str], str],
+        hypothesis: str,
+    ) -> np.ndarray:
+        texts = self._to_list(target_texts)
+        pairs = [{"target_text": t, "hypothesis": hypothesis} for t in texts]
+        results = self.prober.predict_batch(pairs)
+        return np.array([float(r[self.output_key]) for r in results], dtype=np.float64)
 
-    def ogexplain(self, pairs: List[List[str]], background: List[List[str]], visualize: bool = True): # returns shap.Explanation object
-        input_strings = [self._single_string(pair) for pair in pairs]                                   # alter versuch
-        background_strings = [self._single_string(pair) for pair in background]                         # also explainer hasst tupel (?)
+    def explain_pair(
+        self,
+        pair: Pair,
+        background: Optional[List[List[str]]] = None,
+        *,
+        explain: str = "hypothesis",
+        max_evals: Optional[int] = None,
+    ):
+        if shap is None:
+            raise ModuleNotFoundError(
+                "SHAP is not installed. Install `shap` to use interpretability.shapley."
+            )
 
-        #input_arrays = [np.array([s]) for s in input_strings]
-        #background_arrays = [np.array([s]) for s in background_strings]
+        target_text, hypothesis = self._normalize_pair(pair)
 
-        masker = Text(background_strings[0])
-        #explainer = shap.Explainer(self.entailment_scalar, masker) #explicit
-        #shap_values = explainer(input_strings)
-        explainer = shap.Explainer(self.prober.predict_one(), background_strings)
-        shap_values = explainer(input_strings)
+        if explain not in {"hypothesis", "target_text"}:
+            raise ValueError("explain must be either 'hypothesis' or 'target_text'")
+
+        masker = shap.maskers.Text(self.prober.tokenizer)
+        call_kwargs = {}
+        if max_evals is not None:
+            call_kwargs["max_evals"] = max_evals
+
+        if explain == "hypothesis":
+            model_fn = lambda texts: self._predict_with_fixed_premise(target_text, texts)
+            values = shap.Explainer(model_fn, masker=masker)(
+                [hypothesis],
+                **call_kwargs,
+            )
+        else:
+            model_fn = lambda texts: self._predict_with_fixed_hypothesis(texts, hypothesis)
+            values = shap.Explainer(model_fn, masker=masker)(
+                [target_text],
+                **call_kwargs,
+            )
+
+        return values
+
+    def explain(
+        self,
+        pairs: List[List[str]],
+        background: Optional[List[List[str]]] = None,
+        *,
+        explain: str = "hypothesis",
+        max_evals: Optional[int] = None,
+        visualize: bool = False,
+    ):
+        all_values = [
+            self.explain_pair(
+                pair,
+                background=background,
+                explain=explain,
+                max_evals=max_evals,
+            )
+            for pair in pairs
+        ]
 
         if visualize:
-            self.simple_visualization(shap_values, pairs)
+            self.simple_visualization(all_values)
 
-        return shap_values
+        if len(all_values) == 1:
+            return all_values[0]
+        return all_values
 
-    def explainnum(self, pairs: List[List[str]], background: List[List[str]], visualize: bool = True): # returns shap.Explanation object
-        #input_strings = [self._single_string(pair) for pair in pairs]                                  # er wollte np.array inputs
-        #background_strings = [self._single_string(pair) for pair in background]
-        background_lists = [[bg[0], bg[1]] for bg in background]
-        """
-        def predictions(inputs: List[str]) -> np.ndarray:
-            outputs = []
-            for input in inputs:
-                t, h = input.split(" [SEP] ", 1)
-                result = self.prober.predict_one(t, h)[("p_entail")]
-                outputs.append(result)
-            return np.array(outputs)
+    def kernelexplain(
+        self,
+        pairs: List[List[str]],
+        background: Optional[List[List[str]]] = None,
+        *,
+        explain: str = "hypothesis",
+        max_evals: Optional[int] = None,
+        visualize: bool = False,
+    ):
+        return self.explain(
+            pairs,
+            background=background,
+            explain=explain,
+            max_evals=max_evals,
+            visualize=visualize,
+        )
 
-        """
-        #input_arrays = [np.array([s]) for s in input_strings]
-        #background_arrays = [np.array([s]) for s in background_strings]
+    def explainbest(
+        self,
+        pairs: List[List[str]],
+        background: Optional[List[List[str]]] = None,
+        visualize: bool = False,
+    ):
+        return self.explain(pairs, background=background, visualize=visualize)
 
-        #tokenizer = AutoTokenizer.from_pretrained("roberta-large-mnli")
-        #masker = shap.maskers.Text(tokenizer)
+    def explainnum(
+        self,
+        pairs: List[List[str]],
+        background: Optional[List[List[str]]] = None,
+        visualize: bool = False,
+    ):
+        return self.explain(pairs, background=background, visualize=visualize)
 
-        #explainer = shap.Explainer(self.entailment_scalar, masker) #explicit
-        #shap_values = explainer(input_strings)
-        explainer = shap.Explainer(self.shapley_predict, np.array(background_lists))
-        shap_values = explainer(np.array(pairs))
+    def ogexplain(
+        self,
+        pairs: List[List[str]],
+        background: Optional[List[List[str]]] = None,
+        visualize: bool = False,
+    ):
+        return self.explain(pairs, background=background, visualize=visualize)
 
-        #if visualize:
-        #    self.simple_visualization(shap_values, pairs)
-
-        return shap_values
-
-    def explainbest(self, pairs: List[List[str]], background: List[List[str]], visualize: bool = True): # returns shap.Explanation object
-        input_strings = [self._single_string(pair) for pair in pairs]                                   # letzter versuch
-        background_strings = [self._single_string(pair) for pair in background]
-        #background_lists = [[bg[0], bg[1]] for bg in background]
-        """
-        def predictions(inputs: List[str]) -> np.ndarray:                                       # nicht mehr gebraucht, war mal zu übergebende funktion
-            outputs = []
-            for input in inputs:
-                t, h = input.split(" [SEP] ", 1)
-                result = self.prober.predict_one(t, h)[("p_entail")]
-                outputs.append(result)
-            return np.array(outputs)
-
-        """
-        #input_arrays = [np.array([s]) for s in input_strings]
-        #background_arrays = [np.array([s]) for s in background_strings]
-
-        tokenizer = AutoTokenizer.from_pretrained("roberta-large-mnli")
-        #masker = shap.maskers.Text(tokenizer)
-        #explainer = shap.Explainer(self.entailment_scalar, masker) #explicit
-        #shap_values = explainer(input_strings)
-        print("background_strings: ", background_strings)
-        explainer = shap.Explainer(self.shapley_predict, masker=CustomMasker(tokenizer), data=background_strings)
-        print("input_strings: " ,input_strings)
-        shap_values = explainer(input_strings)
-
-        #if visualize:
-        #    self.simple_visualization(shap_values, pairs)
-
-        return shap_values
-
-    def explain(self, pairs: List[List[str]], background: List[List[str]]):     # ?
-        input_strings = [self._single_string(pair) for pair in pairs]
-        background_strings = [self._single_string(pair) for pair in background]
-
-        print("background_strings: ", background_strings)
-        explainer = shap.Explainer(self.shapley_predict)
-        print("input_strings: " ,input_strings)
-        shap_values = explainer(input_strings)
-
-        return shap_values
-
-    def kernelexplain(self, pairs: List[List[str]], background: List[List[str]]):           # spezifischen explainer probiert
-        input_strings = [self._single_string(pair) for pair in pairs]                       # der mag aber text net so
-        background_strings = [self._single_string(pair) for pair in background]               # der "normale" explainer assumed die besten settings
-
-        explainer = shap.KernelExplainer(self.shapley_predict, np.array(background_strings))
-        shap_values = explainer(np.array(input_strings))
-
-        return shap_values
-
-    def simple_visualization(self, shap_values, pairs: List[List[str]]):            # kam nichtmal dazu das zu testen
+    @staticmethod
+    def simple_visualization(shap_values):
+        if shap is None:
+            raise ModuleNotFoundError(
+                "SHAP is not installed. Install `shap` to use interpretability.shapley."
+            )
         shap.initjs()
-
-        shap.summary_plot(shap_values)
-
-        for i, value in enumerate(shap_values):
-            premise, hypothesis = pairs[i]
-            print(f"\nPair {i}: Premise: {premise} , Hypothesis: {hypothesis}\n")
-            shap.plots.text(value)
+        if isinstance(shap_values, list):
+            for values in shap_values:
+                shap.plots.text(values[0])
+            return
+        shap.plots.text(shap_values[0])
