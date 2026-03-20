@@ -35,6 +35,7 @@ class ProbeExample:
     target_text: str
     hypothesis: str
     label: int
+    property: str = ""
 
 
 class PairDataset(Dataset):
@@ -126,6 +127,7 @@ def load_examples(
                 target_text=str(record["target_text"]),
                 hypothesis=str(record["hypothesis"]),
                 label=mapped,
+                property=str(record.get("property", "")),
             )
         )
         if limit is not None and len(examples) >= limit:
@@ -183,6 +185,7 @@ def _build_training_args(args: argparse.Namespace) -> TrainingArguments:
         "greater_is_better": True,
         "remove_unused_columns": False,
         "report_to": "none",
+        "dataloader_num_workers": args.dataloader_num_workers,
     }
 
     if "evaluation_strategy" in signature:
@@ -248,6 +251,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--num-train-epochs", type=float, default=3.0)
 
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--dataloader-num-workers",
+        type=int,
+        default=2,
+        help="Number of DataLoader worker processes for data loading. "
+             "0 = main process only (single core). 2-4 spreads load across cores.",
+    )
     p.add_argument("--logging-steps", type=int, default=50)
     p.add_argument("--save-total-limit", type=int, default=2)
 
@@ -260,6 +270,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--max-train-examples", type=int, default=None)
     p.add_argument("--max-eval-examples", type=int, default=None)
+
+    p.add_argument(
+        "--upsample-threshold",
+        type=float,
+        default=0.15,
+        metavar="FLOAT",
+        help=(
+            "Properties with a positive rate below this threshold have their positive "
+            "examples upsampled. Set to 0 to disable upsampling."
+        ),
+    )
+    p.add_argument(
+        "--upsample-factor",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Positive examples for minority properties are repeated this many times total.",
+    )
     p.add_argument(
         "--log-level",
         default="INFO",
@@ -277,6 +305,40 @@ def _count_labels(examples: Iterable[ProbeExample]) -> Dict[str, int]:
         else:
             counts["not_entailment"] += 1
     return counts
+
+
+def upsample_minority_properties(
+    examples: List[ProbeExample],
+    *,
+    threshold: float,
+    factor: int,
+    seed: int,
+) -> tuple[List[ProbeExample], Dict[str, dict]]:
+    from collections import defaultdict
+
+    by_prop: Dict[str, List[ProbeExample]] = defaultdict(list)
+    for ex in examples:
+        by_prop[ex.property].append(ex)
+
+    extra: List[ProbeExample] = []
+    stats: Dict[str, dict] = {}
+    for prop, prop_examples in sorted(by_prop.items()):
+        n_pos = sum(1 for e in prop_examples if e.label == ENTAILMENT_LABEL)
+        n_total = len(prop_examples)
+        pos_rate = n_pos / n_total if n_total > 0 else 0.0
+        if pos_rate < threshold and n_pos > 0:
+            positives = [e for e in prop_examples if e.label == ENTAILMENT_LABEL]
+            extra.extend(positives * (factor - 1))
+            stats[prop] = {
+                "original_pos_rate": round(pos_rate, 4),
+                "n_pos": n_pos,
+                "added": n_pos * (factor - 1),
+            }
+
+    result = examples + extra
+    rng = np.random.default_rng(seed)
+    rng.shuffle(result)
+    return result, stats
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -336,6 +398,28 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not eval_examples:
         raise ValueError("No evaluation examples after filtering/mapping.")
 
+    upsample_stats: Dict[str, dict] = {}
+    if args.upsample_threshold > 0:
+        train_examples, upsample_stats = upsample_minority_properties(
+            train_examples,
+            threshold=args.upsample_threshold,
+            factor=args.upsample_factor,
+            seed=args.seed,
+        )
+        if upsample_stats:
+            logger.info(
+                "Upsampled %d minority properties (threshold=%.2f, factor=%d): %s",
+                len(upsample_stats),
+                args.upsample_threshold,
+                args.upsample_factor,
+                list(upsample_stats.keys()),
+            )
+        else:
+            logger.info(
+                "No properties below upsample threshold %.2f — no upsampling applied.",
+                args.upsample_threshold,
+            )
+
     logger.info(
         "Train examples: %d (%s)",
         len(train_examples),
@@ -368,7 +452,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=collator,
         compute_metrics=_compute_binary_metrics,
     )
@@ -407,6 +491,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             "weight_decay": args.weight_decay,
             "warmup_ratio": args.warmup_ratio,
             "num_train_epochs": args.num_train_epochs,
+            "upsample_threshold": args.upsample_threshold,
+            "upsample_factor": args.upsample_factor,
+            "upsampled_properties": upsample_stats,
         },
         "metrics": metrics,
         "label_map": {

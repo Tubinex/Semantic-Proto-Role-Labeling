@@ -18,6 +18,7 @@ from hypothesis import (
     TypeAwareTemplateGenerator,
     batch_classify,
 )
+from hypothesis.type_aware_templates import TEMPLATES, classify_type
 
 
 def parse_vp(vp: str) -> tuple[str, str]:
@@ -124,6 +125,12 @@ def iter_pairs(
             arg=arg, verb=verb, sentence=target_text, props=cats
         )
 
+        arg_type = (
+            classify_type(arg, generator._model)
+            if isinstance(generator, TypeAwareTemplateGenerator)
+            else None
+        )
+
         for prop, label, applicable_str in zip(cats, labels, applicables):
             applicable = applicable_str.strip().lower() == "true"
 
@@ -150,6 +157,11 @@ def iter_pairs(
                 "label":       int(label),
                 "applicable":  applicable,
                 "split":       split,
+                "arg_type":    arg_type,
+                "used_generic": (
+                    arg_type is not None
+                    and TEMPLATES.get(arg_type, {}).get(prop) is None
+                ),
             }
 
             total += 1
@@ -188,9 +200,12 @@ def main() -> int:
     )
     p.add_argument(
         "--output", "-o",
-        default="data/processed/pairs.jsonl",
+        default=None,
         metavar="JSONL",
-        help='Output JSONL path (or "-" for stdout).',
+        help=(
+            'Output JSONL path (or "-" for stdout). '
+            "Defaults to data/hypotheses/{generator}/pairs.jsonl."
+        ),
     )
     p.add_argument(
         "--split",
@@ -256,6 +271,9 @@ def main() -> int:
     )
 
     args = p.parse_args()
+
+    if args.output is None:
+        args.output = f"data/hypotheses/{args.generator}/pairs.jsonl"
 
     generator = _build_generator(args)
 

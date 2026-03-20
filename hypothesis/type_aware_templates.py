@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from functools import lru_cache
 
 from transformers import pipeline
@@ -36,7 +37,9 @@ def classify_type(arg: str, model: str = _DEFAULT_MODEL) -> str:
     if key in _classify_cache:
         return _classify_cache[key]
     try:
-        result = _get_pipeline(model)(arg, CANDIDATE_LABELS)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*pipelines sequentially.*")
+            result = _get_pipeline(model)(arg, CANDIDATE_LABELS)
         label: str = result["labels"][0]
     except Exception:
         label = "unknown"
@@ -78,7 +81,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "instigation":             "{arg} caused the event to happen.",
         "location_of_event":       "The event occurred at the location of {arg}.",
         "makes_physical_contact":  "{arg} physically touched something during the event.",
-        "manipulated_by_another":  "Another participant physically controlled {arg} during the event.",
+        "manipulated_by_another":  "Another participant handled or controlled {arg} during the event.",
         "predicate_changed_argument": "The event directly changed {arg}.",
         "sentient":                "{arg} is a sentient being.",
         "stationary":              "{arg} remained in the same place during the event.",
@@ -93,6 +96,8 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "sentient":               "{arg} is a human being.",
         "instigation":            "{arg} caused the event to happen.",
         "change_of_location":     "{arg} moved to a different location during the event.",
+        "manipulated_by_another": "Another participant directed or controlled {arg} during the event.",
+        "stationary":             "{arg} did not change their position or location during the event.",
     },
     "organization": {
         "awareness":              "People acting for {arg} were aware of what was happening during the event.",
@@ -100,6 +105,10 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "instigation":            "{arg} caused the event to happen.",
         "makes_physical_contact": "People acting for {arg} physically touched something during the event.",
         "sentient":               "People acting on behalf of {arg} are sentient beings.",
+        "manipulated_by_another": "Another party directed or exerted control over {arg} during the event.",
+        "change_of_location":     "{arg} relocated or moved its operations during the event.",
+        "change_of_state":        "The event caused a change in the state or condition of {arg}.",
+        "stationary":             "{arg}'s location or base of operations did not change during the event.",
     },
     "physical_object": {
         "change_of_location":     "{arg} moved to a different location during the event.",
@@ -107,6 +116,11 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "exists_as_physical":     "{arg} is a physical object.",
         "stationary":             "{arg} remained in the same place during the event.",
         "predicate_changed_argument": "The event directly changed {arg}.",
+        "manipulated_by_another": "Another participant physically handled or moved {arg} during the event.",
+        "awareness":              "{arg} registered or responded to the event.",
+        "volition":               "{arg} was set in motion or activated intentionally during the event.",
+        "sentient":               "{arg} was treated as a sentient entity during the event.",
+        "instigation":            "{arg} was the triggering cause of the event.",
     },
     "location": {
         "location_of_event":      "The event occurred at {arg}.",
@@ -115,6 +129,12 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "existed_during":         "{arg} existed during the event.",
         "existed_before":         "{arg} existed before the event.",
         "existed_after":          "{arg} existed after the event.",
+        "awareness":              "The event was registered or recorded at {arg}.",
+        "volition":               "The event was deliberately directed toward or at {arg}.",
+        "sentient":               "{arg} was treated as a sentient entity during the event.",
+        "instigation":            "The event originated from or was caused by conditions at {arg}.",
+        "manipulated_by_another": "Another participant altered or acted upon {arg} during the event.",
+        "change_of_location":     "{arg} was relocated or shifted during the event.",
     },
     "abstract_concept": {
         "awareness":              "The event involved awareness related to {arg}.",
@@ -125,6 +145,9 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "volition":               "The event occurred through intentional actions involving {arg}.",
         "instigation":            "{arg} played a causal role in the event.",
         "predicate_changed_argument": "The event directly changed {arg}.",
+        "change_of_location":     "{arg} was transferred or moved to a different context during the event.",
+        "stationary":             "{arg} remained unchanged in scope or context during the event.",
+        "manipulated_by_another": "Another participant shaped or controlled {arg} during the event.",
     },
     "quantity_or_measure": {
         "change_of_state":        "The event changed the value of {arg}.",
@@ -133,6 +156,11 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "stationary":             "{arg} remained in the same place during the event.",
         "changes_possession":     "During the event, someone gained possession of {arg}.",
         "predicate_changed_argument": "The event directly affected {arg}.",
+        "awareness":              "The event brought {arg} to the attention of a participant.",
+        "volition":               "{arg} was deliberately chosen or applied during the event.",
+        "sentient":               "{arg} was treated as a sentient entity during the event.",
+        "instigation":            "{arg} was the determining factor that caused the event.",
+        "manipulated_by_another": "Another participant adjusted or controlled {arg} during the event.",
     },
 }
 
