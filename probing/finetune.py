@@ -293,6 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
+    p.add_argument(
+        "--gradient-checkpointing",
+        action="store_true",
+        default=False,
+        help="Enable gradient checkpointing to reduce activation memory at the cost of ~20%% extra compute.",
+    )
 
     return p
 
@@ -376,6 +382,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         config=config,
         ignore_mismatched_sizes=True,
     )
+
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+        logger.info("Gradient checkpointing enabled")
 
     logger.info("Loading and mapping training data")
     train_examples = load_examples(
