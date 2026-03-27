@@ -25,6 +25,18 @@ def _resolve_device(device: str) -> torch.device:
 
 
 class Prober:
+    """Run NLI inference to probe proto-role properties
+
+    This class wraps a HuggingFace sequence-classification model and 
+    applies it to (sentence, hypothesis) pairs. For each pair it returns 
+    the probability that the sentence entails the hypothesis,
+    which we interpret as the degree to which the corresponding proto-role 
+    property holds for the argument in that sentence.
+
+    Three-class models (entailment/neutral/contradiction) are handled by
+    collapsing to a binary probability via ``_format_output``
+    """
+
     def __init__(
         self,
         model_name_or_path: str,
@@ -35,6 +47,29 @@ class Prober:
         threshold: float = 0.5,
         label_map_arg: Optional[str] = None,
     ) -> None:
+        """
+        Parameters
+        ----------
+        model_name_or_path:
+            HuggingFace model ID or local path to a sequence-classification
+            checkpoint (e.g. ``"roberta-large-mnli"``).
+        device:
+            ``"auto"`` selects CUDA when available, otherwise CPU.
+        max_length:
+            Maximum token length for the concatenated premise+hypothesis input.
+            256 covers SPR1 sentences and their short hypotheses while staying well 
+            within RoBERTa's 512-token absolute limit
+        batch_size:
+            Number of pairs processed in a single forward pass
+        threshold:
+            Decision boundary on ``p_entail`` for the binary ``pred_bool``
+            output field. Default 0.5 treats entailment and non-entailment as
+            equally likely.
+        label_map_arg:
+            Optional JSON string or file path that overrides automatic label
+            resolution, required when the model uses generic ``LABEL_N`` output labels 
+            that cannot be inferred from the model card
+        """
         self.model_name_or_path = model_name_or_path
         self.device = _resolve_device(device)
         self.max_length = max_length

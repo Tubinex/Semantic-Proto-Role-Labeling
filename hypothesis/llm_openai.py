@@ -145,7 +145,12 @@ def _build_user_message(
 
 
 class OpenAIGenerator(HypothesisGenerator):
-    """
+    """LLM-based hypothesis generator using the OpenAI Chat Completions API.
+
+    Instead of filling a fixed template, this generator prompts an LLM to
+    write a context-sensitive hypothesis for each (sentence, argument, property)
+    triple.
+
     Parameters
     ----------
     model:

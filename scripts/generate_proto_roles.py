@@ -1,8 +1,18 @@
+"""Assign gold proto-role labels to SPR1 annotations
+
+The property groupings below are based on Dowty:
+- Proto-agent properties are associated with the causal, volitional participant.
+- Proto-patient properties are associated with the affected, theme-like participant.
+
+Output: spr1_with_gold.json, the same structure as spr1.json with an added
+``gold_role`` field per annotation (1 = proto-agent, 0 = proto-patient).
+"""
 import json
 
 INPUT_FILE = "../data/spr1.json"
 OUTPUT_FILE = "../data/spr1_with_gold.json"
 
+# Properties that are entailments for the Proto-Agent role according to Dowty
 PROTO_AGENT_PROPERTIES = {
     "awareness",
     "instigation",
@@ -14,6 +24,7 @@ PROTO_AGENT_PROPERTIES = {
 
 }
 
+# Properties that are entailments for the Proto-Patient role according to Dowty
 PROTO_PATIENT_PROPERTIES = {
     "change_of_state",
     "change_of_location",
@@ -45,9 +56,18 @@ for entry_id, annotations in data.items():
 
         for i, prop in enumerate(categories):
 
+            # SPR1 marks some properties as inapplicable when the property
+            # cannot meaningfully hold for this argument type.
+            # These annotations are excluded from the score sum to 
+            # avoid unfairly penalising an argument for properties
+            # that are impossible
             if not applicable[i]:
                 continue
 
+            # Raw SPR1 Likert ratings are summed within each property cluster. 
+            # Summing rather than averaging preserves the contribution
+            # of each applicable property without discarding the effect of
+            # having more or fewer applicable properties on one side.
             value = int(labels[i])
 
             if prop in PROTO_AGENT_PROPERTIES:

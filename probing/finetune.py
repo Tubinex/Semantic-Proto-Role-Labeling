@@ -86,6 +86,20 @@ def map_record_to_binary_label(
     label_threshold: int,
     keep_inapplicable: bool,
 ) -> Optional[int]:
+    """Convert a raw SPR1 Likert rating to a binary NLI label
+
+    SPR1 annotators rated each proto-role property on a 1-7 Likert scale,
+    we binarise by treating ratings at or above ``label_threshold`` (default 4,
+    the middle of the scale) as ENTAILMENT and ratings below it as
+    NOT_ENTAILMENT. This follows the convention used in prior SPRL work.
+
+    Rows where ``applicable=False`` are optionally excluded. These are cases
+    where the annotators judged the property to be undefined for the argument,
+    including them would add noise because the Likert rating is meaningless for
+    these properties
+
+    Returns ``None`` when the record should be skipped
+    """
     applicable = _parse_bool(record.get("applicable", True))
     if not keep_inapplicable and not applicable:
         return None
@@ -332,6 +346,18 @@ def upsample_minority_properties(
     factor: int,
     seed: int,
 ) -> tuple[List[ProbeExample], Dict[str, dict]]:
+    """Oversample positive examples for rare proto-role properties.
+
+    Some SPR1 properties (e.g. ``created``, ``destroyed``) are rare in natural text.
+    This creates severe class imbalance, the positive class may
+    represent only a few percent of all examples for such properties, which
+    causes the model to learn to always predict NOT_ENTAILMENT and still achieve
+    high accuracy. Upsampling the minority class encourages the model to learn
+    a meaningful decision boundary for every property.
+
+    Only properties whose positive rate falls below ``threshold`` are upsampled.
+    Their positive examples are repeated ``factor`` times in total
+    """
     from collections import defaultdict
 
     by_prop: Dict[str, List[ProbeExample]] = defaultdict(list)
@@ -467,6 +493,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         max_length=args.max_length,
     )
 
+    # Padding sequences to a multiple of 8 is a hardware efficiency trick,
+    # NVIDIA GPUs operate most efficiently on matrix dimensions that are
+    # multiples of 8 (or 16 for fp16)
     pad_to_multiple = 8 if args.device == "cuda" else None
     collator = DataCollatorWithPadding(
         tokenizer=tokenizer, pad_to_multiple_of=pad_to_multiple)

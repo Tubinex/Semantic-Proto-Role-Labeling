@@ -22,6 +22,18 @@ from hypothesis.type_aware_templates import TEMPLATES, classify_type
 
 
 def parse_vp(vp: str) -> tuple[str, str]:
+    """Parse a SPR1 ``vp`` field into (verb, arg) strings.
+
+    SPR1 encodes the predicate-argument pair as a string with two orderings
+    depending on the grammatical role of the argument:
+    - ``"VERB <predicate> ARG <argument>"``, used when the argument follows the predicate
+    - ``"ARG <argument> VERB <predicate>"``, used when the argument precedes the predicate
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(verb_phrase, argument_phrase)`` as strings
+    """
     if vp.startswith("VERB ") and " ARG " in vp:
         rest = vp[len("VERB "):]
         verb_part, arg_part = rest.split(" ARG ", 1)
@@ -46,6 +58,13 @@ def _find_subseq(tokens: list[str], subseq: list[str]) -> int:
 
 
 def markup_sentence(sentence: str, verb: str, arg: str) -> tuple[str, bool]:
+    """Inserts [PRED]/[ARG] span markers into a sentence
+
+    Returns
+    -------
+    tuple[str, bool]
+        ``(marked_sentence, success_flag)``
+    """
     s_tokens = sentence.split()
     v_tokens = verb.split()
     a_tokens = arg.split()
@@ -146,6 +165,19 @@ def iter_pairs(
 
             row_id = f"{spr_id}_{prop}"
 
+            # Output schema for each (sentence, property) pair:
+            #   id           – unique identifier "<spr_id>_<property>"
+            #   target_text  – sentence with [PRED]/[ARG] markers
+            #   hypothesis   – generated hypothesis
+            #   spr_id       – original SPR1 entry identifier for traceability
+            #   verb/arg     – predicate and argument strings extracted from the vp field
+            #   property     – proto-role property name
+            #   label        – raw SPR1 Likert rating 1–7
+            #   applicable   – whether the property is defined for this argument
+            #   split        – train/dev/test partition from SPR1
+            #   arg_type     – semantic type inferred by zero-shot classifier (or None)
+            #   used_generic – True when the type-specific template was missing and
+            #                  the generic fallback was used instead
             yield {
                 "id":          row_id,
                 "target_text": target_text,
