@@ -166,8 +166,11 @@ class Prober:
             p_entailment = probs_list[lm.idx_entailment]
             p_neutral = probs_list[lm.idx_neutral]
 
+            # Collapse 3-class NLI to binary by splitting the neutral mass equally.
+            # "neutral" sits between entailment and contradiction, so we
+            # treat it as half-evidence for each side rather than assigning it fully
+            # to either. This keeps p_entail + p_not_entail == 1.0.
             p_entail = p_entailment + (p_neutral / 2)
-            #p_not_entail = p_neutral + p_contradiction
             p_not_entail = p_contradiction + (p_neutral / 2)
 
             raw = {

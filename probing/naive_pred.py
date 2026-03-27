@@ -27,6 +27,8 @@ def compute_score(property_dict, property_list):
     """
     Compute mean probability for given property group.
     """
+    # Missing properties default to 0.0 (no entailment evidence), which slightly
+    # biases the mean downward when a property was not probed for this argument.
     values = [property_dict.get(prop,0.0) for prop in property_list]
     return np.mean(values)
 
@@ -73,19 +75,3 @@ def save_predictions(results, output_path):
                 **result
             }
             f.write(json.dumps(output_entry) + "\n")
-
-
-
-# # MAIN
-
-# if __name__ == "__main__":
-#     input_file = "predictions.jsonl"
-#     output_file = "proto_role_naive_pred.jsonl"
-
-#     grouped_data = group_input(input_file)
-
-#     results = predict_all(grouped_data)
-
-#     save_predictions(results, output_file)
-
-

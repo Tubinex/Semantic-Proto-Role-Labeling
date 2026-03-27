@@ -2,7 +2,8 @@ import numpy as np
 
 def precision (gold, y):
     """
-    Berechnet Precision eines Arrays y bei gegebenem Goldwert-Array mit Werten 1(=true) oder 0(=false)
+    Computes precision for predicted array y given gold array.
+    Values are binary: 1 = positive, 0 = negative.
     """
     gold = np.array(gold)
     y = np.array(y)
@@ -19,7 +20,7 @@ def precision (gold, y):
 
 def recall (gold, y):
     """
-    Berechnet Recall eines Arrays y bei gegebenem Goldwert-Array 
+    Computes recall for predicted array y given gold array.
     """
     gold = np.array(gold)
     y = np.array(y)
@@ -36,14 +37,14 @@ def recall (gold, y):
 
 def f1_measure (precison, recall):
     """
-    Berechnet f1-Score aus macro precison und macro recall
+    Computes F1 score from macro precision and macro recall.
     """
     f1_m =  2*(precison*recall)/(precison+recall)
     return f1_m
 
 def accuracy(gold, y):
     """
-    Berechnet Accuracy von Array y bei gegebenem Goldwert array
+    Computes accuracy for predicted array y given gold array.
     """
 
     gold = np.array(gold)
@@ -54,7 +55,7 @@ def accuracy(gold, y):
 
 def kappa(gold, y):
     """
-    Berechnet Kappa score mit fp, fn, tp, tn (Formel hab ich von Wikipedia)
+    Computes Cohen's kappa using tp, tn, fp, fn (formula from Wikipedia).
     """
 
     gold = np.array(gold)

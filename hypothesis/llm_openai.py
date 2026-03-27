@@ -198,7 +198,6 @@ class OpenAIGenerator(HypothesisGenerator):
             result = self._call_api(
                 target_text=sentence, arg=arg, verb=verb, props=missing
             )
-            print(result)
             for x in result:
                 result[x] = result[x].replace('[ARG]', arg)
             cached = {**cached, **result}

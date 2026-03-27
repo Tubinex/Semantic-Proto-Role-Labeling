@@ -33,6 +33,10 @@ _NORMALIZE: Dict[str, str] = {
     "no_entailment": NOT_ENTAILMENT,
 }
 
+# Hardcoded label-index order for models that return generic "LABEL_0/1/2" labels.
+# Order verified against HuggingFace model cards (as of 2024): 0=contradiction,
+# 1=neutral, 2=entailment. If a future model version changes this order, it will
+# need to be updated manually
 _KNOWN_MODELS: Dict[str, Dict[int, str]] = {
     "roberta-large-mnli": {0: CONTRADICTION, 1: NEUTRAL, 2: ENTAILMENT},
     "roberta-base-mnli": {0: CONTRADICTION, 1: NEUTRAL, 2: ENTAILMENT},
@@ -119,6 +123,7 @@ class LabelMapper:
         )
 
         if is_generic and model_name is not None:
+            # Try exact match first, then fall back to substring matching
             fallback = _KNOWN_MODELS.get(model_name)
             if fallback is None:
                 for known_name, known_map in _KNOWN_MODELS.items():

@@ -63,7 +63,8 @@ class PairDataset(Dataset):
             key: torch.tensor(value[idx], dtype=torch.long)
             for key, value in self.encodings.items()
         }
-        item["labels"] = torch.tensor(self.examples[idx].label, dtype=torch.long)
+        item["labels"] = torch.tensor(
+            self.examples[idx].label, dtype=torch.long)
         return item
 
 
@@ -188,6 +189,11 @@ def _build_training_args(args: argparse.Namespace) -> TrainingArguments:
         "dataloader_num_workers": args.dataloader_num_workers,
     }
 
+    # TrainingArguments parameter names changed across transformers versions:
+    #   evaluation_strategy  → eval_strategy 
+    #   save_strategy        → still present but optional in older versions
+    #   logging_strategy     → added later on
+    # Inspects the live signature to avoid passing unknown kwargs to older installs
     if "evaluation_strategy" in signature:
         kwargs["evaluation_strategy"] = "epoch"
     elif "eval_strategy" in signature:
@@ -201,7 +207,8 @@ def _build_training_args(args: argparse.Namespace) -> TrainingArguments:
 
     if args.device == "cuda":
         if not torch.cuda.is_available():
-            raise ValueError("--device cuda requested but CUDA is not available")
+            raise ValueError(
+                "--device cuda requested but CUDA is not available")
     elif args.device == "cpu":
         if "use_cpu" in signature:
             kwargs["use_cpu"] = True
@@ -226,13 +233,18 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    p.add_argument("--model", "-m", required=True, help="HuggingFace model ID or local path.")
+    p.add_argument("--model", "-m", required=True,
+                   help="HuggingFace model ID or local path.")
     p.add_argument("--input", "-i", required=True, help="Input pairs JSONL.")
-    p.add_argument("--output-dir", "-o", required=True, help="Directory for checkpoints and metadata.")
+    p.add_argument("--output-dir", "-o", required=True,
+                   help="Directory for checkpoints and metadata.")
 
-    p.add_argument("--train-split", default="train", help="Split name used for training.")
-    p.add_argument("--eval-split", default="dev", help="Split name used for evaluation.")
-    p.add_argument("--label-threshold", type=int, default=4, help="label>=threshold maps to entailment.")
+    p.add_argument("--train-split", default="train",
+                   help="Split name used for training.")
+    p.add_argument("--eval-split", default="dev",
+                   help="Split name used for evaluation.")
+    p.add_argument("--label-threshold", type=int, default=4,
+                   help="label>=threshold maps to entailment.")
     p.add_argument(
         "--keep-inapplicable",
         action="store_true",
@@ -333,7 +345,10 @@ def upsample_minority_properties(
         n_total = len(prop_examples)
         pos_rate = n_pos / n_total if n_total > 0 else 0.0
         if pos_rate < threshold and n_pos > 0:
-            positives = [e for e in prop_examples if e.label == ENTAILMENT_LABEL]
+            positives = [
+                e for e in prop_examples if e.label == ENTAILMENT_LABEL]
+            # factor = total repetitions (including the original), so we add
+            # (factor - 1) extra copies on top of the originals already in `examples`.
             extra.extend(positives * (factor - 1))
             stats[prop] = {
                 "original_pos_rate": round(pos_rate, 4),
@@ -453,7 +468,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     pad_to_multiple = 8 if args.device == "cuda" else None
-    collator = DataCollatorWithPadding(tokenizer=tokenizer, pad_to_multiple_of=pad_to_multiple)
+    collator = DataCollatorWithPadding(
+        tokenizer=tokenizer, pad_to_multiple_of=pad_to_multiple)
 
     training_args = _build_training_args(args)
 

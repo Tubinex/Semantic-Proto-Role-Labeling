@@ -42,6 +42,8 @@ def classify_type(arg: str, model: str = _DEFAULT_MODEL) -> str:
             result = _get_pipeline(model)(arg, CANDIDATE_LABELS)
         label: str = result["labels"][0]
     except Exception:
+        # if the zero-shot classifier fails for any reason we fall back to "unknown" so
+        # that hypothesis generation can still continue with generic templates.
         label = "unknown"
     _classify_cache[key] = label
     return label
@@ -54,7 +56,9 @@ def batch_classify(
 ) -> None:
     from tqdm import tqdm
 
-    unique = list(dict.fromkeys(args))  
+    # dict.fromkeys preserves insertion order while deduplicating (unlike set()).
+    # This ensures deterministic batching order regardless of cache state
+    unique = list(dict.fromkeys(args))
     uncached = [a for a in unique if (a, model) not in _classify_cache]
     if not uncached:
         return

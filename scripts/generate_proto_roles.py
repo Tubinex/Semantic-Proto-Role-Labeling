@@ -56,6 +56,9 @@ for entry_id, annotations in data.items():
             elif prop in PROTO_PATIENT_PROPERTIES:
                 patient_score += value
 
+        # gold_role encoding: 1 = proto-agent, 0 = proto-patient.
+        # Determined by summing raw SPR1 Likert ratings across
+        # proto-agent vs proto-patient properties (inapplicable skipped).
         if agent_score > patient_score:
             ann["gold_role"] = 1
         else:
