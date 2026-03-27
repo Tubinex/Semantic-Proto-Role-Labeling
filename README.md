@@ -1,5 +1,4 @@
-## Semantic-Proto-Role-Labeling
-#### Semantic Proto-Role Labeling with NLI
+## Semantic-Proto-Role-Labeling with NLI
 
 ### Concept
 This project explores the task of SPRL through the lens of NLI.
@@ -50,7 +49,7 @@ We use the pretrained model [roberta-large-mnli](https://huggingface.co/Facebook
 
 This work demonstrates that recasting SPRL as NLI is a principled and effective approach that achieves results
 competitive with dedicated neural models while offering greater interpretability through its explicit hypothesis
-structure. Refer to the [report](./Semantic_Proto_Role_Labeling.pdf) for details.
+structure. Refer to the [report](./Semantic_Proto_Role_Labeling_with_NLI.pdf) for details.
 
 ### Context
 
