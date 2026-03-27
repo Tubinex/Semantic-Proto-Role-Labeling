@@ -1,4 +1,4 @@
-## Semantic-Proto-Role-Labeling with NLI
+## Semantic Proto-Role Labeling with NLI
 
 ### Concept
 This project explores the task of SPRL through the lens of NLI.
