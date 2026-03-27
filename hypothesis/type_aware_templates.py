@@ -1,3 +1,14 @@
+"""Type-aware hypothesis generator for Semantic Proto-Role Labeling.
+
+Generic templates (e.g. "{arg} is a sentient being.") are semantically
+inappropriate for many argument types. 
+
+The phrase makes intuitive sense for a human but is awkward for a location or a quantity. 
+This approach addresses that by first classifying the semantic type of the argument using 
+zero-shot NLI classification and then selecting a type-specific template that is
+linguistically natural for that type. If no type-specific template exists for
+a given (type, property) pair, the generator falls back to the generic template.
+"""
 from __future__ import annotations
 
 import re
@@ -27,6 +38,9 @@ _NEGATION_RE = re.compile(
 
 @lru_cache(maxsize=8)
 def _get_pipeline(model: str):
+    # Loading a transformer pipeline downloads model weights and allocates GPU memory.
+    # This is an expensive one-time cost, lru_cache ensures the pipeline is
+    # reused across all calls within a process rather than reloaded each time.
     return pipeline("zero-shot-classification", model=model)
 
 _classify_cache: dict[tuple[str, str], str] = {}
@@ -42,6 +56,8 @@ def classify_type(arg: str, model: str = _DEFAULT_MODEL) -> str:
             result = _get_pipeline(model)(arg, CANDIDATE_LABELS)
         label: str = result["labels"][0]
     except Exception:
+        # if the zero-shot classifier fails for any reason we fall back to "unknown" so
+        # that hypothesis generation can still continue with generic templates.
         label = "unknown"
     _classify_cache[key] = label
     return label
@@ -54,7 +70,9 @@ def batch_classify(
 ) -> None:
     from tqdm import tqdm
 
-    unique = list(dict.fromkeys(args))  
+    # dict.fromkeys preserves insertion order while deduplicating (unlike set()).
+    # This ensures deterministic batching order regardless of cache state
+    unique = list(dict.fromkeys(args))
     uncached = [a for a in unique if (a, model) not in _classify_cache]
     if not uncached:
         return
@@ -68,6 +86,13 @@ def batch_classify(
             pbar.update(len(chunk))
 
 
+# Template bank indexed by (semantic_type, property_name).
+# The "generic" entry is the fallback used when no type-specific template
+# exists for a (type, property) pair. Type-specific templates are designed
+# to be semantically natural for that category, for example, "destroyed"
+# for a human is expressed as being killed, whereas for an organization it
+# means being dissolved. Not every (type, property) combination has a tailored template,
+# missing entries fall through to "generic"
 TEMPLATES: dict[str, dict[str, str]] = {
     "generic": {
         "awareness":               "{arg} was aware of what was happening during the event.",
@@ -185,6 +210,9 @@ TEMPLATES: dict[str, dict[str, str]] = {
 
 
 def _get_template(arg_type: str, prop: str) -> str:
+    # Two-level fallback: prefer the type-specific template, fall back to the
+    # generic one if this (type, property) pair has no dedicated entry.
+    # Returns an empty string if even the generic template is missing (which should never happpen when working with SPR1)
     return (
         TEMPLATES.get(arg_type, {}).get(prop)
         or TEMPLATES["generic"].get(prop, "")

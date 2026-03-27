@@ -25,14 +25,23 @@ def group_input(filepath):
 
 def compute_score(property_dict, property_list):
     """
-    Compute mean probability for given property group.
+    Compute mean probability for a given property group.
     """
+    # Missing properties default to 0.0 (no entailment evidence), which slightly
+    # biases the mean downward when a property was not probed for this argument.
     values = [property_dict.get(prop,0.0) for prop in property_list]
     return np.mean(values)
 
 def predict_one(property_dict):
     """
-    Predict proto-role for a single argument.
+    Predict the proto-role for a single argument
+
+    This is the naive baseline, no training is involved. 
+    Proto-agent and proto-patient scores are computed as the mean 
+    entailment probability across their respective property groups, 
+    and the role with the higher mean is assigned. 
+    
+    The ``decision_margin`` represents how confidently the model separated the two roles.
     """
     agent_score = compute_score(property_dict, PROTO_AGENT_PROPERTIES)
     patient_score = compute_score(property_dict, PROTO_PATIENT_PROPERTIES)
@@ -73,19 +82,3 @@ def save_predictions(results, output_path):
                 **result
             }
             f.write(json.dumps(output_entry) + "\n")
-
-
-
-# # MAIN
-
-# if __name__ == "__main__":
-#     input_file = "predictions.jsonl"
-#     output_file = "proto_role_naive_pred.jsonl"
-
-#     grouped_data = group_input(input_file)
-
-#     results = predict_all(grouped_data)
-
-#     save_predictions(results, output_file)
-
-

@@ -8,6 +8,8 @@ from typing import Generator, Iterable, Iterator, List, Optional, Union
 
 
 def make_id(target_text: str, hypothesis: str) -> str:
+    # 16 hex chars = 64 bits of the SHA256 digest. 
+    # Collision probability for 10M items is incredibly small, acceptable for a lookup key within one dataset
     raw = (target_text + "\n" + hypothesis).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
 

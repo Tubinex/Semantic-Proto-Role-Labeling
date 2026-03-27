@@ -6,8 +6,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder
 
 
-
-
 def load_probing(filepath):
     """
     Load probing predictions and group them by spr_id.
@@ -69,9 +67,6 @@ def build_dataset(probing_data, gold_roles):
 
     return X_dicts, y_labels, spr_ids
 
-
-
-
 class ProtoLabelClassifier:
 
     def __init__(self, property_list):
@@ -105,9 +100,6 @@ class ProtoLabelClassifier:
         labels = self.label_encoder.inverse_transform(y_pred)
 
         return labels, y_proba
-
-
-
 
 def save_predictions(filepath, spr_ids, y_true, y_pred, y_proba, label_encoder):
 

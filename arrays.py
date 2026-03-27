@@ -16,6 +16,8 @@ with open('./artifacts/probing/type-aware-templates/roberta-large-mnli/predictio
         data = json.loads(raw)
 
         predictions.append(1 if data['pred_bool'] else 0)
+        # SPR1 labels are on a 1-7 Likert scale. Threshold at 3: label >= 4
+        # is treated as entailment (property holds), label <= 3 as not-entailment.
         pairs.append(1 if raw_pairs[data['id']]['label'] > 3 else 0)
 
 correct = 0
@@ -30,5 +32,4 @@ with open('./likert.json', 'w+') as f:
     }, f)
 
 print(len(pairs))
-
 print(f'Correct labels: {correct} ({int((100 / len(pairs) * correct) * 100) / 100}%)')

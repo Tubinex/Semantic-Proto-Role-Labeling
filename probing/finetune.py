@@ -63,7 +63,8 @@ class PairDataset(Dataset):
             key: torch.tensor(value[idx], dtype=torch.long)
             for key, value in self.encodings.items()
         }
-        item["labels"] = torch.tensor(self.examples[idx].label, dtype=torch.long)
+        item["labels"] = torch.tensor(
+            self.examples[idx].label, dtype=torch.long)
         return item
 
 
@@ -85,6 +86,20 @@ def map_record_to_binary_label(
     label_threshold: int,
     keep_inapplicable: bool,
 ) -> Optional[int]:
+    """Convert a raw SPR1 Likert rating to a binary NLI label
+
+    SPR1 annotators rated each proto-role property on a 1-7 Likert scale,
+    we binarise by treating ratings at or above ``label_threshold`` (default 4,
+    the middle of the scale) as ENTAILMENT and ratings below it as
+    NOT_ENTAILMENT. This follows the convention used in prior SPRL work.
+
+    Rows where ``applicable=False`` are optionally excluded. These are cases
+    where the annotators judged the property to be undefined for the argument,
+    including them would add noise because the Likert rating is meaningless for
+    these properties
+
+    Returns ``None`` when the record should be skipped
+    """
     applicable = _parse_bool(record.get("applicable", True))
     if not keep_inapplicable and not applicable:
         return None
@@ -188,6 +203,11 @@ def _build_training_args(args: argparse.Namespace) -> TrainingArguments:
         "dataloader_num_workers": args.dataloader_num_workers,
     }
 
+    # TrainingArguments parameter names changed across transformers versions:
+    #   evaluation_strategy  → eval_strategy 
+    #   save_strategy        → still present but optional in older versions
+    #   logging_strategy     → added later on
+    # Inspects the live signature to avoid passing unknown kwargs to older installs
     if "evaluation_strategy" in signature:
         kwargs["evaluation_strategy"] = "epoch"
     elif "eval_strategy" in signature:
@@ -201,7 +221,8 @@ def _build_training_args(args: argparse.Namespace) -> TrainingArguments:
 
     if args.device == "cuda":
         if not torch.cuda.is_available():
-            raise ValueError("--device cuda requested but CUDA is not available")
+            raise ValueError(
+                "--device cuda requested but CUDA is not available")
     elif args.device == "cpu":
         if "use_cpu" in signature:
             kwargs["use_cpu"] = True
@@ -226,13 +247,18 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    p.add_argument("--model", "-m", required=True, help="HuggingFace model ID or local path.")
+    p.add_argument("--model", "-m", required=True,
+                   help="HuggingFace model ID or local path.")
     p.add_argument("--input", "-i", required=True, help="Input pairs JSONL.")
-    p.add_argument("--output-dir", "-o", required=True, help="Directory for checkpoints and metadata.")
+    p.add_argument("--output-dir", "-o", required=True,
+                   help="Directory for checkpoints and metadata.")
 
-    p.add_argument("--train-split", default="train", help="Split name used for training.")
-    p.add_argument("--eval-split", default="dev", help="Split name used for evaluation.")
-    p.add_argument("--label-threshold", type=int, default=4, help="label>=threshold maps to entailment.")
+    p.add_argument("--train-split", default="train",
+                   help="Split name used for training.")
+    p.add_argument("--eval-split", default="dev",
+                   help="Split name used for evaluation.")
+    p.add_argument("--label-threshold", type=int, default=4,
+                   help="label>=threshold maps to entailment.")
     p.add_argument(
         "--keep-inapplicable",
         action="store_true",
@@ -320,6 +346,18 @@ def upsample_minority_properties(
     factor: int,
     seed: int,
 ) -> tuple[List[ProbeExample], Dict[str, dict]]:
+    """Oversample positive examples for rare proto-role properties.
+
+    Some SPR1 properties (e.g. ``created``, ``destroyed``) are rare in natural text.
+    This creates severe class imbalance, the positive class may
+    represent only a few percent of all examples for such properties, which
+    causes the model to learn to always predict NOT_ENTAILMENT and still achieve
+    high accuracy. Upsampling the minority class encourages the model to learn
+    a meaningful decision boundary for every property.
+
+    Only properties whose positive rate falls below ``threshold`` are upsampled.
+    Their positive examples are repeated ``factor`` times in total
+    """
     from collections import defaultdict
 
     by_prop: Dict[str, List[ProbeExample]] = defaultdict(list)
@@ -333,7 +371,10 @@ def upsample_minority_properties(
         n_total = len(prop_examples)
         pos_rate = n_pos / n_total if n_total > 0 else 0.0
         if pos_rate < threshold and n_pos > 0:
-            positives = [e for e in prop_examples if e.label == ENTAILMENT_LABEL]
+            positives = [
+                e for e in prop_examples if e.label == ENTAILMENT_LABEL]
+            # factor = total repetitions (including the original), so we add
+            # (factor - 1) extra copies on top of the originals already in `examples`.
             extra.extend(positives * (factor - 1))
             stats[prop] = {
                 "original_pos_rate": round(pos_rate, 4),
@@ -452,8 +493,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         max_length=args.max_length,
     )
 
+    # Padding sequences to a multiple of 8 is a hardware efficiency trick,
+    # NVIDIA GPUs operate most efficiently on matrix dimensions that are
+    # multiples of 8 (or 16 for fp16)
     pad_to_multiple = 8 if args.device == "cuda" else None
-    collator = DataCollatorWithPadding(tokenizer=tokenizer, pad_to_multiple_of=pad_to_multiple)
+    collator = DataCollatorWithPadding(
+        tokenizer=tokenizer, pad_to_multiple_of=pad_to_multiple)
 
     training_args = _build_training_args(args)
 
